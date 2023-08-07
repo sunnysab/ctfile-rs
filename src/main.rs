@@ -1,4 +1,4 @@
-use std::str::FromStr;
+mod api;
 
 use anyhow::Result;
 use rand::Rng;
@@ -6,40 +6,11 @@ use serde::Deserialize;
 
 const DEFAULT_TOKEN: &str = "5sijtqc2rlocvvkvmn7777";
 
-const DEFAULT_USER_AGENT: &str =
-    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0";
-
 struct Link {
     /// File id defined by ctfile.
     file: String,
     /// Share password.
     password: Option<String>,
-}
-
-impl FromStr for Link {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        // Typical url: https://306t.com/file/4070316-134836896?p=[password]
-        let url = reqwest::Url::parse(s)?;
-        let path = url.path(); // path = "/file/4070316-134836896"
-        let (_, file_id) = path.rsplit_once("/").unwrap(); // file id = "4070316-134836896"
-        let password = if let Some((_, v)) = url.query_pairs().filter(|(k, v)| k == "p").next() {
-            Some(v.to_string())
-        } else {
-            None
-        };
-
-        Ok(Link {
-            file: String::from(file_id),
-            password,
-        })
-    }
-}
-
-fn random() -> f64 {
-    let mut rng = rand::thread_rng();
-    rng.gen()
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,104 +34,21 @@ struct CtFile {
 }
 
 #[derive(Debug, Deserialize)]
-struct Response {
-    file: CtFile,
-}
-
-async fn get_file_by_id(file_id: &str, password: &str, token: &str) -> Result<CtFile> {
-    const URL: &str = "https://webapi.ctfile.com/getfile.php";
-
-    let count_separator = |file: &str| file.chars().filter(|ch| *ch == '-').count();
-    let make_path = |file: &str| match count_separator(file) {
-        1 => "file",
-        _ => "f",
-    };
-
-    let mut url = reqwest::Url::parse(URL)?;
-    url.query_pairs_mut()
-        .append_pair("path", make_path(file_id))
-        .append_pair("f", file_id)
-        .append_pair("passcode", password)
-        .append_pair("token", token)
-        .append_pair("r", &format!("{}", random()))
-        .append_pair("ref", "https://ctfile.qinlili.workers.dev");
-
-    let client = reqwest::Client::new();
-    let response = client
-        .get(url)
-        .header("User-Agent", DEFAULT_USER_AGENT)
-        .send()
-        .await?;
-    let (status, text) = (response.status().as_u16(), response.text().await?);
-
-    if status != 200 {
-        anyhow::bail!("Status code {}, server returns: {}", status, text);
-    }
-    if !text.starts_with("{\"code\":200,") {
-        anyhow::bail!("Interface returns {}", text);
-    }
-
-    let response = serde_json::from_str::<Response>(&text)?;
-    Ok(response.file)
-}
-
-async fn get_file_by_link(
-    link: &str,
-    share_password: Option<String>,
-    token: &str,
-) -> Result<CtFile> {
-    let Link {
-        file,
-        password: password_in_link,
-    } = link.parse()?;
-    let final_password = share_password // 先使用用户提供的密码
-        .or(password_in_link) // 否则使用链接中的密码
-        .unwrap_or_default(); // 否则使用空密码
-
-    get_file_by_id(&file, &final_password, token).await
-}
-
-async fn get_download_url(file: &CtFile) -> Result<String> {
-    const URL: &str = "https://webapi.ctfile.com/get_file_url.php";
-    let mut url = reqwest::Url::parse(URL)?;
-
-    url.query_pairs_mut()
-        .append_pair("uid", &format!("{}", file.userid))
-        .append_pair("fid", &format!("{}", file.file_id))
-        .append_pair("file_chk", &file.file_chk)
-        .append_pair("app", "0")
-        .append_pair("acheck", "2")
-        .append_pair("rd", &format!("{}", random()));
-    let client = reqwest::Client::new();
-    let response = client
-        .get(url)
-        .header("User-Agent", DEFAULT_USER_AGENT)
-        .send()
-        .await?;
-    let (status, text) = (response.status().as_u16(), response.text().await?);
-    if status != 200 {
-        anyhow::bail!("Status code {}, server returns: {}", status, text);
-    }
-
-    #[derive(Deserialize)]
-    struct R {
-        code: u16,
-        #[serde(rename = "downurl")]
-        url: String,
-        #[serde(rename = "file_name")]
-        name: String,
-        #[serde(rename = "file_size")]
-        exact_size: u32,
-    }
-    let result = serde_json::from_str::<R>(&text)?;
-    Ok(result.url)
+struct CtFileSource {
+    code: u16,
+    #[serde(rename = "downurl")]
+    url: String,
+    #[serde(rename = "file_name")]
+    name: String,
+    #[serde(rename = "file_size")]
+    exact_size: u32,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let file = get_file_by_id("4070316-134836896", "", DEFAULT_TOKEN).await?;
-    let url = get_download_url(&file).await?;
+    let file = api::get_file_by_id("4070316-134836896", "", DEFAULT_TOKEN).await?;
+    let source = file.get_download_source().await?;
     println!("{file:#?}");
-    println!("url = {url}");
+    println!("source = {source:#?}");
     Ok(())
 }
