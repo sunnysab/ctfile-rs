@@ -43,7 +43,7 @@ fn random() -> f64 {
 }
 
 #[derive(Debug, Deserialize)]
-struct FileBasicInfo {
+struct CtFile {
     /// 文件名
     file_name: String,
     /// 文件大小，格式如 "627.20 MB"
@@ -64,10 +64,10 @@ struct FileBasicInfo {
 
 #[derive(Debug, Deserialize)]
 struct Response {
-    file: FileBasicInfo,
+    file: CtFile,
 }
 
-async fn get_url_by_id(file_id: &str, password: &str, token: &str) -> Result<FileBasicInfo> {
+async fn get_file_by_id(file_id: &str, password: &str, token: &str) -> Result<CtFile> {
     const URL: &str = "https://webapi.ctfile.com/getfile.php";
 
     let count_separator = |file: &str| file.chars().filter(|ch| *ch == '-').count();
@@ -104,11 +104,11 @@ async fn get_url_by_id(file_id: &str, password: &str, token: &str) -> Result<Fil
     Ok(response.file)
 }
 
-async fn get_download_url_by_link(
+async fn get_file_by_link(
     link: &str,
     share_password: Option<String>,
     token: &str,
-) -> Result<FileBasicInfo> {
+) -> Result<CtFile> {
     let Link {
         file,
         password: password_in_link,
@@ -117,13 +117,50 @@ async fn get_download_url_by_link(
         .or(password_in_link) // 否则使用链接中的密码
         .unwrap_or_default(); // 否则使用空密码
 
-    get_url_by_id(&file, &final_password, token).await
+    get_file_by_id(&file, &final_password, token).await
+}
+
+async fn get_download_url(file: &CtFile) -> Result<String> {
+    const URL: &str = "https://webapi.ctfile.com/get_file_url.php";
+    let mut url = reqwest::Url::parse(URL)?;
+
+    url.query_pairs_mut()
+        .append_pair("uid", &format!("{}", file.userid))
+        .append_pair("fid", &format!("{}", file.file_id))
+        .append_pair("file_chk", &file.file_chk)
+        .append_pair("app", "0")
+        .append_pair("acheck", "2")
+        .append_pair("rd", &format!("{}", random()));
+    let client = reqwest::Client::new();
+    let response = client
+        .get(url)
+        .header("User-Agent", DEFAULT_USER_AGENT)
+        .send()
+        .await?;
+    let (status, text) = (response.status().as_u16(), response.text().await?);
+    if status != 200 {
+        anyhow::bail!("Status code {}, server returns: {}", status, text);
+    }
+
+    #[derive(Deserialize)]
+    struct R {
+        code: u16,
+        #[serde(rename = "downurl")]
+        url: String,
+        #[serde(rename = "file_name")]
+        name: String,
+        #[serde(rename = "file_size")]
+        exact_size: u32,
+    }
+    let result = serde_json::from_str::<R>(&text)?;
+    Ok(result.url)
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let result = get_url_by_id("4070316-134836896", "", DEFAULT_TOKEN).await?;
-
-    println!("{result:#?}");
+    let file = get_file_by_id("4070316-134836896", "", DEFAULT_TOKEN).await?;
+    let url = get_download_url(&file).await?;
+    println!("{file:#?}");
+    println!("url = {url}");
     Ok(())
 }
