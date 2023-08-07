@@ -1,25 +1,39 @@
 use std::str::FromStr;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rand::Rng;
 use serde::Deserialize;
 
 const DEFAULT_TOKEN: &str = "5sijtqc2rlocvvkvmn7777";
+
+const DEFAULT_USER_AGENT: &str =
+    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0";
 
 struct Link {
     /// File id defined by ctfile.
     file: String,
     /// Share password.
     password: Option<String>,
-    /// Token, "5sijtqc2rlocvvkvmn7777" by default.
-    token: Option<String>,
 }
 
 impl FromStr for Link {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        todo!()
+        // Typical url: https://306t.com/file/4070316-134836896?p=[password]
+        let url = reqwest::Url::parse(s)?;
+        let path = url.path(); // path = "/file/4070316-134836896"
+        let (_, file_id) = path.rsplit_once("/").unwrap(); // file id = "4070316-134836896"
+        let password = if let Some((_, v)) = url.query_pairs().filter(|(k, v)| k == "p").next() {
+            Some(v.to_string())
+        } else {
+            None
+        };
+
+        Ok(Link {
+            file: String::from(file_id),
+            password,
+        })
     }
 }
 
@@ -27,7 +41,6 @@ fn random() -> f64 {
     let mut rng = rand::thread_rng();
     rng.gen()
 }
-
 
 #[derive(Debug, Deserialize)]
 struct FileBasicInfo {
@@ -58,43 +71,59 @@ async fn get_url_by_id(file_id: &str, password: &str, token: &str) -> Result<Fil
     const URL: &str = "https://webapi.ctfile.com/getfile.php";
 
     let count_separator = |file: &str| file.chars().filter(|ch| *ch == '-').count();
-    let make_path = |file: &str| if count_separator(file) == 1 { "file" } else { "f" };
+    let make_path = |file: &str| match count_separator(file) {
+        1 => "file",
+        _ => "f",
+    };
 
     let mut url = reqwest::Url::parse(URL)?;
-    url.query_pairs_mut().append_pair("path", make_path(file_id)).append_pair("f", file_id).append_pair("passcode", password).append_pair("token", token).append_pair("r", &format!("{}", random())).append_pair("ref", "https://ctfile.qinlili.workers.dev");
+    url.query_pairs_mut()
+        .append_pair("path", make_path(file_id))
+        .append_pair("f", file_id)
+        .append_pair("passcode", password)
+        .append_pair("token", token)
+        .append_pair("r", &format!("{}", random()))
+        .append_pair("ref", "https://ctfile.qinlili.workers.dev");
 
     let client = reqwest::Client::new();
-    let response = client.get(url).header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0").send().await?;
-    let text = response.text().await?;
+    let response = client
+        .get(url)
+        .header("User-Agent", DEFAULT_USER_AGENT)
+        .send()
+        .await?;
+    let (status, text) = (response.status().as_u16(), response.text().await?);
 
-    if !response.status().is_success() {
-        anyhow::bail!("Status code {}, server returns: {}", response.status().as_u16(), text);
+    if status != 200 {
+        anyhow::bail!("Status code {}, server returns: {}", status, text);
     }
     if !text.starts_with("{\"code\":200,") {
         anyhow::bail!("Interface returns {}", text);
     }
 
-    let response = response.json::<Response>().await?;
+    let response = serde_json::from_str::<Response>(&text)?;
     Ok(response.file)
 }
 
-async fn get_download_url_by_link(link: &str, password: &str, token: &str) -> Result<FileBasicInfo> {
-    let url = reqwest::Url::parse(link)
-        .context(|| format!("failed to parse link {link}"))?;
+async fn get_download_url_by_link(
+    link: &str,
+    share_password: Option<String>,
+    token: &str,
+) -> Result<FileBasicInfo> {
+    let Link {
+        file,
+        password: password_in_link,
+    } = link.parse()?;
+    let final_password = share_password // 先使用用户提供的密码
+        .or(password_in_link) // 否则使用链接中的密码
+        .unwrap_or_default(); // 否则使用空密码
 
-    let path = url.path();
-    let (_, file_id) = path.rsplit_once("/");
-    let password = if let Some((k, v)) = url.query_pairs().filter(|(k, v)| k == 'p').next() {
-        v.as_ref()
-    } else {
-        password
-    };
-    get_url_by_id(file_id, &password, token).await
+    get_url_by_id(&file, &final_password, token).await
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    let _ = get_url_by_id("4070316-134836896", "", DEFAULT_TOKEN).await?;
+    let result = get_url_by_id("4070316-134836896", "", DEFAULT_TOKEN).await?;
 
+    println!("{result:#?}");
     Ok(())
 }
