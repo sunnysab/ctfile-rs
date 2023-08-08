@@ -1,7 +1,7 @@
 mod api;
+mod downloader;
 
 use anyhow::Result;
-use rand::Rng;
 use serde::Deserialize;
 
 const DEFAULT_TOKEN: &str = "5sijtqc2rlocvvkvmn7777";
@@ -41,7 +41,7 @@ struct CtFileSource {
     #[serde(rename = "file_name")]
     name: String,
     #[serde(rename = "file_size")]
-    exact_size: u32,
+    exact_size: usize,
 }
 
 #[tokio::main(flavor = "current_thread")]
