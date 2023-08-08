@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 use super::CtFileSource;
 
 #[derive(Clone)]
-struct Progress {
+pub struct Progress {
     finished: Rc<Cell<bool>>,
 
     total: Rc<Cell<usize>>,
@@ -28,49 +28,78 @@ impl Progress {
         }
     }
 
+    pub fn total(&self) -> usize {
+        self.total.get()
+    }
+
     fn set_total(&self, total: usize) {
         self.total.set(total);
+    }
+
+    pub fn received(&self) -> usize {
+        self.received.get()
     }
 
     fn set_received(&self, received: usize) {
         self.received.set(received);
     }
 
-    fn finished(&self) {
+    pub fn is_finished(&self) -> bool {
+        self.finished.get()
+    }
+
+    fn finish(&self) {
         self.finished.set(true);
     }
 }
 
-pub struct DownloadTask {
-    name: String,
+pub struct DownloadTaskBuilder {
+    pub name: String,
 
-    progress: Progress,
+    pub progress: Option<Progress>,
     handle: Option<JoinHandle<()>>,
 }
 
-impl DownloadTask {
-    pub fn new(name: &str, total: usize) -> Self {
+pub struct DownloadTask {
+    pub name: String,
+
+    pub progress: Progress,
+    handle: JoinHandle<()>,
+}
+
+impl DownloadTaskBuilder {
+    pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
-            progress: Progress::new(total),
+            progress: None,
             handle: None,
         }
     }
 
-    pub fn set_handle(&mut self, handle: JoinHandle<()>) {
+    pub fn set_handle(mut self, handle: JoinHandle<()>) -> Self {
         self.handle = Some(handle);
+        self
     }
 
-    pub fn cancel(&self) {
-        if !self.finished.get() {
-            if let Some(handle) = &self.handle {
-                handle.abort();
-            }
+    pub fn set_progress(mut self, progress: Progress) -> Self {
+        self.progress = Some(progress);
+        self
+    }
+
+    pub fn build(self) -> DownloadTask {
+        let Self {
+            name,
+            progress,
+            handle,
+        } = self;
+        let progress = progress.expect("Need to set progress first.");
+        let handle = handle.expect("Need to set handle first.");
+
+        DownloadTask {
+            name,
+            progress,
+            handle,
         }
-    }
-
-    pub fn finish(&self, is_finished: bool) {
-        self.finished.set(is_finished);
     }
 }
 
@@ -82,16 +111,18 @@ async fn download(url: &str, path: &str, expected_size: usize) -> Result<Downloa
         .content_length()
         .map(|x| x as usize)
         .unwrap_or(expected_size);
+    let progress = Progress::new(content_length);
+
     let status = response.status();
     if !status.is_success() {
         bail!("unexpected status code: {}, task ends.", status.as_u16());
     }
 
-    let mut progress = Progress::new(content_length);
     let mut stream = response.bytes_stream();
     let mut target = tokio::fs::File::create(path).await?;
     let mut received = 0;
 
+    let mut progress2 = progress.clone();
     let handle = tokio::task::spawn_local(async move {
         while let Some(item) = stream.next().await {
             match item {
@@ -99,16 +130,20 @@ async fn download(url: &str, path: &str, expected_size: usize) -> Result<Downloa
                     let len = target.write(chunk.as_ref()).await.unwrap();
                     received += len;
 
-                    progress.set_received(received);
+                    progress2.set_received(received);
                 }
-                Err(e) => {}
+                Err(e) => {
+                    println!("{e:?}");
+                }
             }
         }
-        progress.finished();
+        progress2.finish();
     });
 
-    let mut task = DownloadTask::new(path, content_length);
-    task.handle = Some(handle);
+    let task = DownloadTaskBuilder::new(path)
+        .set_handle(handle)
+        .set_progress(progress)
+        .build();
     Ok(task)
 }
 
@@ -117,12 +152,20 @@ pub struct DownloadQueue {
 }
 
 impl DownloadQueue {
-    async fn push(&mut self, source: &CtFileSource) -> Result<()> {
+    pub fn new() -> Self {
+        Self { queue: vec![] }
+    }
+
+    pub async fn push(&mut self, source: &CtFileSource) -> Result<()> {
         let url = &source.url;
         let filename = &source.name;
 
         let task = download(url, filename, source.exact_size).await?;
         self.queue.push(task);
         Ok(())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &DownloadTask> {
+        self.queue.iter()
     }
 }
