@@ -94,7 +94,7 @@ pub async fn get_file_by_link(
 }
 
 impl CtFile {
-    pub async fn get_download_source(self: &Self) -> Result<CtFileSource> {
+    pub async fn get_download_source(&self) -> Result<CtFileSource> {
         const URL: &str = "https://webapi.ctfile.com/get_file_url.php";
         let mut url = reqwest::Url::parse(URL)?;
 
