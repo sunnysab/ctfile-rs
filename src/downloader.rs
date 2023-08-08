@@ -1,18 +1,22 @@
 use anyhow::{bail, Result};
 use futures_util::StreamExt;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
 use super::CtFileSource;
 
+type Shared<T> = Rc<Cell<T>>;
+
 #[derive(Clone)]
 pub struct Progress {
-    finished: Rc<Cell<bool>>,
+    finished: Shared<bool>,
+    failed: Shared<bool>,
+    fail_message: Rc<RefCell<String>>,
 
-    total: Rc<Cell<usize>>,
-    received: Rc<Cell<usize>>,
+    total: Shared<usize>,
+    received: Shared<usize>,
 }
 
 impl Progress {
@@ -20,9 +24,13 @@ impl Progress {
         let total = Rc::new(Cell::new(total));
         let received = Rc::new(Cell::new(0));
         let finished = Rc::new(Cell::new(false));
+        let failed = Rc::new(Cell::new(false));
+        let fail_message = Rc::new(RefCell::new("".to_string()));
 
         Self {
             finished,
+            failed,
+            fail_message,
             total,
             received,
         }
@@ -50,6 +58,22 @@ impl Progress {
 
     fn finish(&self) {
         self.finished.set(true);
+    }
+
+    pub fn is_failed(&self) -> bool {
+        self.failed.get()
+    }
+
+    pub fn get_err_message(&self) -> Option<String> {
+        if self.is_failed() {
+            return Some(self.fail_message.clone().take());
+        }
+        None
+    }
+
+    fn fail<T: Into<String>>(&self, message: T) {
+        self.failed.set(true);
+        *self.fail_message.borrow_mut() = message.into();
     }
 }
 
@@ -133,7 +157,8 @@ async fn download(url: &str, path: &str, expected_size: usize) -> Result<Downloa
                     progress2.set_received(received);
                 }
                 Err(e) => {
-                    println!("{e:?}");
+                    progress2.fail(format!("{e}"));
+                    return;
                 }
             }
         }
