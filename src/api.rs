@@ -4,6 +4,15 @@ use std::str::FromStr;
 
 const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0";
 
+macro_rules! url {
+    ($url: expr; $( $k: expr => $v: expr ), *) => {{
+        let mut url = reqwest::Url::parse($url)?;
+        url.query_pairs_mut()$(.append_pair($k, &format!("{}", $v)))*;
+
+        url
+    }};
+}
+
 struct Link {
     /// File id defined by ctfile.
     file: String,
@@ -71,23 +80,19 @@ fn random() -> f64 {
 }
 
 pub async fn get_file_by_id(file_id: &str, password: &str, token: &str) -> Result<CtFile> {
-    const URL: &str = "https://webapi.ctfile.com/getfile.php";
-
     let count_separator = |file: &str| file.chars().filter(|ch| *ch == '-').count();
     let make_path = |file: &str| match count_separator(file) {
         1 => "file",
         _ => "f",
     };
-
-    let mut url = reqwest::Url::parse(URL)?;
-    url.query_pairs_mut()
-        .append_pair("path", make_path(file_id))
-        .append_pair("f", file_id)
-        .append_pair("passcode", password)
-        .append_pair("token", token)
-        .append_pair("r", &format!("{}", random()))
-        .append_pair("ref", "https://ctfile.qinlili.workers.dev");
-
+    let url = url!("https://webapi.ctfile.com/getfile.php";
+        "path" => make_path(file_id),
+        "f" => file_id,
+        "passcode" => password,
+        "token" => token,
+        "r" => random(),
+        "ref" => "https://ctfile.qinlili.workers.dev"
+    );
     let client = reqwest::Client::new();
     let response = client.get(url).header("User-Agent", DEFAULT_USER_AGENT).send().await?;
     let (status, text) = (response.status().as_u16(), response.text().await?);
@@ -121,16 +126,14 @@ pub async fn get_file_by_link(link: &str, share_password: Option<String>, token:
 
 impl CtFile {
     pub async fn get_download_source(&self) -> Result<CtFileSource> {
-        const URL: &str = "https://webapi.ctfile.com/get_file_url.php";
-        let mut url = reqwest::Url::parse(URL)?;
-
-        url.query_pairs_mut()
-            .append_pair("uid", &format!("{}", self.userid))
-            .append_pair("fid", &format!("{}", self.file_id))
-            .append_pair("file_chk", &self.file_chk)
-            .append_pair("app", "0")
-            .append_pair("acheck", "2")
-            .append_pair("rd", &format!("{}", random()));
+        let url = url!("https://webapi.ctfile.com/get_file_url.php";
+            "uid" => self.userid,
+            "fid" => self.file_id,
+            "file_chk" => self.file_chk,
+            "app" => 0,
+            "acheck" => 2,
+            "rd" => random()
+        );
         let client = reqwest::Client::new();
         let response = client.get(url).header("User-Agent", DEFAULT_USER_AGENT).send().await?;
         let (status, text) = (response.status().as_u16(), response.text().await?);
