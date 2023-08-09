@@ -2,11 +2,46 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::str::FromStr;
 
-use super::Link;
-use super::{CtFile, CtFileSource};
-
 const DEFAULT_USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0";
+
+struct Link {
+    /// File id defined by ctfile.
+    file: String,
+    /// Share password.
+    password: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CtFile {
+    /// 文件名
+    file_name: String,
+    /// 文件大小，格式如 "627.20 MB"
+    file_size: String,
+    /// 发布时间，格式如 "2015-11-27"
+    file_time: String,
+    #[serde(rename = "vip_dx_url")]
+    /// VIP 链接
+    link: Option<String>,
+
+    /// 上传者 ID
+    userid: u64,
+    /// 文件 ID
+    file_id: u64,
+    /// 文件哈希值
+    file_chk: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CtFileSource {
+    code: u16,
+    #[serde(rename = "downurl")]
+    pub url: String,
+    #[serde(rename = "file_name")]
+    pub name: String,
+    #[serde(rename = "file_size")]
+    pub exact_size: usize,
+}
 
 impl FromStr for Link {
     type Err = anyhow::Error;
