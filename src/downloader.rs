@@ -146,7 +146,7 @@ async fn download(url: &str, path: &str, expected_size: usize) -> Result<Downloa
     let mut target = tokio::fs::File::create(path).await?;
     let mut received = 0;
 
-    let mut progress2 = progress.clone();
+    let progress2 = progress.clone();
     let handle = tokio::task::spawn_local(async move {
         while let Some(item) = stream.next().await {
             match item {

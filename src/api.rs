@@ -15,21 +15,21 @@ struct Link {
 #[derive(Debug, Deserialize)]
 pub struct CtFile {
     /// 文件名
-    file_name: String,
+    pub file_name: String,
     /// 文件大小，格式如 "627.20 MB"
-    file_size: String,
+    pub file_size: String,
     /// 发布时间，格式如 "2015-11-27"
-    file_time: String,
+    pub file_time: String,
     #[serde(rename = "vip_dx_url")]
     /// VIP 链接
     link: Option<String>,
 
     /// 上传者 ID
-    userid: u64,
+    pub userid: u64,
     /// 文件 ID
-    file_id: u64,
+    pub file_id: u64,
     /// 文件哈希值
-    file_chk: String,
+    pub file_chk: String,
 }
 
 #[derive(Debug, Deserialize)]
