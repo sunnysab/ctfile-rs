@@ -111,19 +111,11 @@ impl DownloadTaskBuilder {
     }
 
     pub fn build(self) -> DownloadTask {
-        let Self {
-            name,
-            progress,
-            handle,
-        } = self;
+        let Self { name, progress, handle } = self;
         let progress = progress.expect("Need to set progress first.");
         let handle = handle.expect("Need to set handle first.");
 
-        DownloadTask {
-            name,
-            progress,
-            handle,
-        }
+        DownloadTask { name, progress, handle }
     }
 }
 
@@ -131,10 +123,7 @@ async fn download(url: &str, path: &str, expected_size: usize) -> Result<Downloa
     let client = reqwest::Client::new();
     let response = client.get(url).send().await?;
 
-    let content_length = response
-        .content_length()
-        .map(|x| x as usize)
-        .unwrap_or(expected_size);
+    let content_length = response.content_length().map(|x| x as usize).unwrap_or(expected_size);
     let progress = Progress::new(content_length);
 
     let status = response.status();

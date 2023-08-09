@@ -67,11 +67,7 @@ fn display_file_size(len: usize) -> String {
     t[i].to_string()
 }
 
-async fn do_link_parsing(
-    url: &str,
-    password: Option<String>,
-    token: Option<String>,
-) -> Result<(CtFile, CtFileSource)> {
+async fn do_link_parsing(url: &str, password: Option<String>, token: Option<String>) -> Result<(CtFile, CtFileSource)> {
     println!("URL {}", url);
     println!("Fetching file metadata...");
     let token = token.unwrap_or(DEFAULT_TOKEN.to_string());
@@ -96,11 +92,7 @@ async fn serve(cli: Cli) -> Result<()> {
 
     match cli.command {
         Commands::Daemon { .. } => {}
-        Commands::Parse {
-            url,
-            password,
-            token,
-        } => {
+        Commands::Parse { url, password, token } => {
             let _ = do_link_parsing(&url, password, token).await?;
         }
         Commands::Download {

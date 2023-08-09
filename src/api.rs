@@ -2,8 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::str::FromStr;
 
-const DEFAULT_USER_AGENT: &str =
-    "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0";
+const DEFAULT_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/116.0";
 
 struct Link {
     /// File id defined by ctfile.
@@ -90,11 +89,7 @@ pub async fn get_file_by_id(file_id: &str, password: &str, token: &str) -> Resul
         .append_pair("ref", "https://ctfile.qinlili.workers.dev");
 
     let client = reqwest::Client::new();
-    let response = client
-        .get(url)
-        .header("User-Agent", DEFAULT_USER_AGENT)
-        .send()
-        .await?;
+    let response = client.get(url).header("User-Agent", DEFAULT_USER_AGENT).send().await?;
     let (status, text) = (response.status().as_u16(), response.text().await?);
 
     if status != 200 {
@@ -112,11 +107,7 @@ pub async fn get_file_by_id(file_id: &str, password: &str, token: &str) -> Resul
     Ok(response.file)
 }
 
-pub async fn get_file_by_link(
-    link: &str,
-    share_password: Option<String>,
-    token: &str,
-) -> Result<CtFile> {
+pub async fn get_file_by_link(link: &str, share_password: Option<String>, token: &str) -> Result<CtFile> {
     let Link {
         file,
         password: password_in_link,
@@ -141,11 +132,7 @@ impl CtFile {
             .append_pair("acheck", "2")
             .append_pair("rd", &format!("{}", random()));
         let client = reqwest::Client::new();
-        let response = client
-            .get(url)
-            .header("User-Agent", DEFAULT_USER_AGENT)
-            .send()
-            .await?;
+        let response = client.get(url).header("User-Agent", DEFAULT_USER_AGENT).send().await?;
         let (status, text) = (response.status().as_u16(), response.text().await?);
         if status != 200 {
             anyhow::bail!("Status code {}, server returns: {}", status, text);
