@@ -65,8 +65,8 @@ impl FromStr for Link {
         // Typical url: https://306t.com/file/4070316-134836896?p=[password]
         let url = reqwest::Url::parse(s)?;
         let path = url.path(); // path = "/file/4070316-134836896"
-        let (_, file_id) = path.rsplit_once("/").unwrap(); // file id = "4070316-134836896"
-        let password = if let Some((_, v)) = url.query_pairs().filter(|(k, v)| k == "p").next() {
+        let (_, file_id) = path.rsplit_once('/').unwrap(); // file id = "4070316-134836896"
+        let password = if let Some((_, v)) = url.query_pairs().find(|(k, _v)| k == "p") {
             Some(v.to_string())
         } else {
             None
@@ -152,7 +152,7 @@ impl CtClient {
         }
         let Response { file } = serde_json::from_str::<Response>(&text)?;
         let CtFileObject {
-            name,
+            
             size,
             publish_date,
             checksum,

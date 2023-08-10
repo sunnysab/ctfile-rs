@@ -3,9 +3,13 @@ pub mod downloader;
 
 use anyhow::Result;
 use clap::Parser;
+use std::cell::RefCell;
+use std::rc::Rc;
+use tokio::net::TcpStream;
+
 use tokio::task;
 
-pub use api::{CtClient, CtFileObject, CtFileSourceObject};
+pub use api::CtClient;
 pub use downloader::DownloadQueue;
 
 const DEFAULT_TOKEN: &str = "5sijtqc2rlocvvkvmn7777";
@@ -89,7 +93,7 @@ async fn do_link_parsing(url: &str, password: Option<String>, token: Option<Stri
     let token = token.unwrap_or(DEFAULT_TOKEN.to_string());
     let client = CtClient::new();
 
-    let file = client.get_file_by_link(&url, password, &token).await?;
+    let file = client.get_file_by_link(url, password, &token).await?;
     println!(
         r#"File {} uploaded on {}\n
         Checksum {}\n
@@ -105,11 +109,63 @@ async fn do_link_parsing(url: &str, password: Option<String>, token: Option<Stri
     Ok(file)
 }
 
+async fn daemon_task(_queue: Rc<RefCell<DownloadQueue>>, socket: TcpStream) -> Result<()> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let mut buf_reader = BufReader::new(socket);
+    let mut line = String::new();
+    loop {
+        buf_reader.read_line(&mut line).await?;
+        let (command, _parameter) = line.split_once(' ').unwrap_or((&line, ""));
+
+        match command {
+            "list" => {
+                unimplemented!()
+            }
+            "add" => {
+                unimplemented!()
+            }
+            _ => {}
+        }
+    }
+}
+
+fn run_process_into_daemon() -> Result<()> {
+    use daemonize::Daemonize;
+    use std::fs::File;
+
+    let stdout = File::create("/tmp/cffile-get-daemon.out")?;
+    let stderr = File::create("/tmp/cffile-get-daemon.err")?;
+
+    let daemonize = Daemonize::new()
+        .pid_file("/tmp/ctfile-get.pid")
+        .stdout(stdout)
+        .stderr(stderr);
+
+    daemonize.start().map_err(Into::into)
+}
+
+async fn daemon(queue: Rc<RefCell<DownloadQueue>>, listen: &str) -> Result<()> {
+    run_process_into_daemon().expect("failed to run process into a daemon.");
+
+    let socket = tokio::net::TcpListener::bind(listen).await?;
+    while let Ok((socket, _)) = socket.accept().await {
+        task::spawn_local(daemon_task(queue.clone(), socket));
+    }
+    Ok(())
+}
+
+async fn print_list() {}
+
 async fn serve(cli: Cli) -> Result<()> {
-    let mut queue = DownloadQueue::new();
+    let queue = DownloadQueue::new();
+    let queue = Rc::new(RefCell::new(queue));
 
     match cli.command {
-        Commands::Daemon { .. } => {}
+        Commands::Daemon { listen } => {
+            let addr = listen.unwrap_or(DEFAULT_LISTEN_ADDR.to_string());
+            daemon(queue, &addr).await?;
+        }
         Commands::Parse { url, password, token } => {
             let _ = do_link_parsing(&url, password, token).await?;
         }
@@ -122,12 +178,17 @@ async fn serve(cli: Cli) -> Result<()> {
             let file = do_link_parsing(&url, password, token).await?;
             if let Some(_daemon) = daemon {
                 // TODO: 通知 daemon 添加任务.
+                unimplemented!()
             } else {
                 // TODO: 传入 checksum 供校验.
-                queue.push(&file).await.expect("failed to add item to download queue.");
+                queue
+                    .borrow_mut()
+                    .push(&file)
+                    .await
+                    .expect("failed to add item to download queue.");
             }
         }
-        Commands::List { daemon } => {
+        Commands::List { daemon: _ } => {
             unimplemented!()
         }
     }

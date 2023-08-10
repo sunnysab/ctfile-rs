@@ -6,8 +6,6 @@ use std::rc::Rc;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
-use super::CtFileSourceObject;
-
 type Shared<T> = Rc<Cell<T>>;
 
 #[derive(Clone)]
