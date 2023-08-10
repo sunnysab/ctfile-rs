@@ -1,21 +1,25 @@
 pub mod api;
 pub mod downloader;
+mod protocol;
 
 use anyhow::Result;
+use bincode::{Decode, Encode};
 use clap::Parser;
+use prettytable::row;
 use std::cell::RefCell;
 use std::rc::Rc;
 use tokio::net::TcpStream;
 
 use tokio::task;
 
+use crate::protocol::{BinStream, Command, CommandResult, TaskStatus};
 pub use api::CtClient;
 pub use downloader::DownloadQueue;
 
 const DEFAULT_TOKEN: &str = "5sijtqc2rlocvvkvmn7777";
 const DEFAULT_LISTEN_ADDR: &str = "localhost:7735";
 
-#[derive(Debug)]
+#[derive(Debug, Encode, Decode)]
 pub struct CtFile {
     /// 文件名
     pub name: String,
@@ -109,23 +113,21 @@ async fn do_link_parsing(url: &str, password: Option<String>, token: Option<Stri
     Ok(file)
 }
 
-async fn daemon_task(_queue: Rc<RefCell<DownloadQueue>>, socket: TcpStream) -> Result<()> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
+async fn daemon_task(queue: Rc<RefCell<DownloadQueue>>, socket: TcpStream) -> Result<()> {
+    use protocol::Command;
 
-    let mut buf_reader = BufReader::new(socket);
-    let mut line = String::new();
+    let mut stream = BinStream::new(socket);
     loop {
-        buf_reader.read_line(&mut line).await?;
-        let (command, _parameter) = line.split_once(' ').unwrap_or((&line, ""));
+        match stream.recv::<Command>().await? {
+            Command::List => {
+                let cloned_task_queue: Vec<_> = queue.borrow().iter().map(TaskStatus::from).collect();
+                let result = CommandResult::List(cloned_task_queue);
 
-        match command {
-            "list" => {
-                unimplemented!()
+                stream.send(result).await?;
             }
-            "add" => {
-                unimplemented!()
+            Command::Add(file) => {
+                queue.borrow_mut().push(&file).await?;
             }
-            _ => {}
         }
     }
 }
@@ -155,15 +157,44 @@ async fn daemon(queue: Rc<RefCell<DownloadQueue>>, listen: &str) -> Result<()> {
     Ok(())
 }
 
-async fn print_list() {}
+fn print_list(status: &Vec<TaskStatus>) {
+    use prettytable::row;
+    use prettytable::{Table};
+
+    let mut table = Table::new();
+    table.add_row(row!["NAME", "RECEIVED", "TOTAL", "PROGRESS", "STATUS"]);
+    for item in status {
+        let name = &item.name[..20];
+        let received = format!("{}", item.received);
+        let total = format!("{}", item.total);
+        let progress = format!("{:.0}%", item.received as f32 * 100.0f32 / item.total as f32);
+        let status = if item.is_finished {
+            String::from("FINISHED")
+        } else {
+            item.fail_message.clone().unwrap_or_else(|| "UNKNOWN".to_string())
+        };
+
+        table.add_row(row![name, received, total, progress, status]);
+    }
+
+    table.printstd();
+}
+
+async fn request_once<Req: Encode, Res: Decode>(target: &str, request: Req) -> Result<Res> {
+    let socket = TcpStream::connect(target).await?;
+    let mut stream = BinStream::new(socket);
+
+    stream.send(request).await?;
+    stream.recv::<Res>().await
+}
 
 async fn serve(cli: Cli) -> Result<()> {
-    let queue = DownloadQueue::new();
-    let queue = Rc::new(RefCell::new(queue));
-
     match cli.command {
         Commands::Daemon { listen } => {
             let addr = listen.unwrap_or(DEFAULT_LISTEN_ADDR.to_string());
+            let queue = DownloadQueue::new();
+            let queue = Rc::new(RefCell::new(queue));
+
             daemon(queue, &addr).await?;
         }
         Commands::Parse { url, password, token } => {
@@ -176,19 +207,28 @@ async fn serve(cli: Cli) -> Result<()> {
             daemon,
         } => {
             let file = do_link_parsing(&url, password, token).await?;
-            if let Some(_daemon) = daemon {
-                // TODO: 通知 daemon 添加任务.
-                unimplemented!()
+            if let Some(addr) = daemon {
+                request_once(&addr, Command::Add(file)).await?;
             } else {
-                queue
-                    .borrow_mut()
-                    .push(&file)
-                    .await
-                    .expect("failed to add item to download queue.");
+                use indicatif::ProgressBar;
+
+                let task = downloader::download(&file, ".").await?;
+                let pb = ProgressBar::new(file.exact_size as u64);
+
+                while !task.progress.is_failed() && !task.progress.is_finished() {
+                    let received = task.progress.received() as u64;
+                    pb.set_position(received);
+                }
+                pb.finish();
             }
         }
-        Commands::List { daemon: _ } => {
-            unimplemented!()
+        Commands::List { daemon } => {
+            let addr = daemon.unwrap_or(DEFAULT_LISTEN_ADDR.to_string());
+            let response: CommandResult = request_once(&addr, Command::List).await?;
+
+            if let CommandResult::List(status) = response {
+                print_list(&status);
+            }
         }
     }
     Ok(())

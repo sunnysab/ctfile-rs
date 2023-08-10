@@ -116,7 +116,7 @@ impl DownloadTaskBuilder {
     }
 }
 
-async fn download(file: &CtFile, path: &str) -> Result<DownloadTask> {
+pub async fn download(file: &CtFile, path: &str) -> Result<DownloadTask> {
     let client = reqwest::Client::new();
     let response = client.get(&file.url).send().await?;
 
