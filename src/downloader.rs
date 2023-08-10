@@ -1,3 +1,4 @@
+use crate::CtFile;
 use anyhow::{bail, Result};
 use futures_util::StreamExt;
 use std::cell::{Cell, RefCell};
@@ -5,7 +6,7 @@ use std::rc::Rc;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
-use super::CtFileSource;
+use super::CtFileSourceObject;
 
 type Shared<T> = Rc<Cell<T>>;
 
@@ -170,11 +171,11 @@ impl DownloadQueue {
         Self { queue: vec![] }
     }
 
-    pub async fn push(&mut self, source: &CtFileSource) -> Result<()> {
-        let url = &source.url;
-        let filename = &source.name;
+    pub async fn push(&mut self, file: &CtFile) -> Result<()> {
+        let url = &file.url;
+        let filename = &file.name;
 
-        let task = download(url, filename, source.exact_size).await?;
+        let task = download(url, filename, file.exact_size).await?;
         self.queue.push(task);
         Ok(())
     }

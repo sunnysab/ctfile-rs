@@ -1,4 +1,5 @@
-use anyhow::Result;
+use crate::CtFile;
+use anyhow::{bail, Result};
 use serde::Deserialize;
 use std::str::FromStr;
 
@@ -20,28 +21,34 @@ struct Link {
     password: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CtFile {
+#[derive(Deserialize)]
+pub struct CtFileObject {
     /// 文件名
-    pub file_name: String,
+    #[serde(rename(deserialize = "file_name"))]
+    pub name: String,
     /// 文件大小，格式如 "627.20 MB"
-    pub file_size: String,
+    #[serde(rename(deserialize = "file_size"))]
+    pub size: String,
     /// 发布时间，格式如 "2015-11-27"
-    pub file_time: String,
+    #[serde(rename(deserialize = "file_time"))]
+    pub publish_date: String,
     #[serde(rename = "vip_dx_url")]
     /// VIP 链接
-    link: Option<String>,
+    vip_link: Option<String>,
 
     /// 上传者 ID
-    pub userid: u64,
+    #[serde(rename(deserialize = "userid"))]
+    pub uploader: u64,
     /// 文件 ID
-    pub file_id: u64,
+    #[serde(rename(deserialize = "file_id"))]
+    pub unique_id: u64,
     /// 文件哈希值
-    pub file_chk: String,
+    #[serde(rename(deserialize = "file_chk"))]
+    pub checksum: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct CtFileSource {
+#[derive(Deserialize)]
+pub struct CtFileSourceObject {
     code: u16,
     #[serde(rename = "downurl")]
     pub url: String,
@@ -79,69 +86,104 @@ fn random() -> f64 {
     rng.gen()
 }
 
-pub async fn get_file_by_id(file_id: &str, password: &str, token: &str) -> Result<CtFile> {
-    let count_separator = |file: &str| file.chars().filter(|ch| *ch == '-').count();
-    let make_path = |file: &str| match count_separator(file) {
-        1 => "file",
-        _ => "f",
-    };
-    let url = url!("https://webapi.ctfile.com/getfile.php";
-        "path" => make_path(file_id),
-        "f" => file_id,
-        "passcode" => password,
-        "token" => token,
-        "r" => random(),
-        "ref" => "https://ctfile.qinlili.workers.dev"
-    );
-    let client = reqwest::Client::new();
-    let response = client.get(url).header("User-Agent", DEFAULT_USER_AGENT).send().await?;
-    let (status, text) = (response.status().as_u16(), response.text().await?);
-
-    if status != 200 {
-        anyhow::bail!("Status code {}, server returns: {}", status, text);
-    }
-    if !text.starts_with("{\"code\":200,") {
-        anyhow::bail!("Interface returns {}", text);
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct Response {
-        file: CtFile,
-    }
-    let response = serde_json::from_str::<Response>(&text)?;
-    Ok(response.file)
+pub struct CtClient {
+    http_client: reqwest::Client,
 }
 
-pub async fn get_file_by_link(link: &str, share_password: Option<String>, token: &str) -> Result<CtFile> {
-    let Link {
-        file,
-        password: password_in_link,
-    } = link.parse()?;
-    let final_password = share_password // 先使用用户提供的密码
-        .or(password_in_link) // 否则使用链接中的密码
-        .unwrap_or_default(); // 否则使用空密码
+impl CtClient {
+    pub fn new() -> Self {
+        let http_client = reqwest::Client::new();
+        Self { http_client }
+    }
 
-    get_file_by_id(&file, &final_password, token).await
-}
+    async fn request(&self, url: reqwest::Url) -> Result<String> {
+        let response = self
+            .http_client
+            .get(url)
+            .header("User-Agent", DEFAULT_USER_AGENT)
+            .send()
+            .await?;
 
-impl CtFile {
-    pub async fn get_download_source(&self) -> Result<CtFileSource> {
+        let (status, body) = (response.status().as_u16(), response.text().await?);
+        if status != 200 {
+            bail!("Status code {}, server returns: {}", status, &body[..200]);
+        }
+
+        Ok(body)
+    }
+
+    async fn get_download_source(&self, uploader: u64, unique_id: u64, checksum: &str) -> Result<CtFileSourceObject> {
         let url = url!("https://webapi.ctfile.com/get_file_url.php";
-            "uid" => self.userid,
-            "fid" => self.file_id,
-            "file_chk" => self.file_chk,
+            "uid" => uploader,
+            "fid" => unique_id,
+            "file_chk" => checksum,
             "app" => 0,
             "acheck" => 2,
             "rd" => random()
         );
-        let client = reqwest::Client::new();
-        let response = client.get(url).header("User-Agent", DEFAULT_USER_AGENT).send().await?;
-        let (status, text) = (response.status().as_u16(), response.text().await?);
-        if status != 200 {
-            anyhow::bail!("Status code {}, server returns: {}", status, text);
+        let body = self.request(url).await?;
+        let result = serde_json::from_str::<CtFileSourceObject>(&body)?;
+        Ok(result)
+    }
+
+    pub async fn get_file_by_id(&self, file_id: &str, password: &str, token: &str) -> Result<CtFile> {
+        let count_separator = |file: &str| file.chars().filter(|ch| *ch == '-').count();
+        let make_path = |file: &str| match count_separator(file) {
+            1 => "file",
+            _ => "f",
+        };
+        let url = url!("https://webapi.ctfile.com/getfile.php";
+            "path" => make_path(file_id),
+            "f" => file_id,
+            "passcode" => password,
+            "token" => token,
+            "r" => random(),
+            "ref" => "https://ctfile.qinlili.workers.dev"
+        );
+        let text = self.request(url).await?;
+
+        if !text.starts_with("{\"code\":200,") {
+            bail!("ctfile server returned {}", text);
         }
 
-        let result = serde_json::from_str::<CtFileSource>(&text)?;
-        Ok(result)
+        #[derive(Deserialize)]
+        struct Response {
+            file: CtFileObject,
+        }
+        let Response { file } = serde_json::from_str::<Response>(&text)?;
+        let CtFileObject {
+            name,
+            size,
+            publish_date,
+            checksum,
+            uploader,
+            unique_id,
+            ..
+        } = file;
+
+        let source = self.get_download_source(uploader, unique_id, &checksum).await?;
+        let CtFileSourceObject {
+            url, name, exact_size, ..
+        } = source;
+        Ok(CtFile {
+            name,
+            publish_date,
+            checksum,
+            url,
+            display_size: size,
+            exact_size,
+        })
+    }
+
+    pub async fn get_file_by_link(&self, link: &str, share_password: Option<String>, token: &str) -> Result<CtFile> {
+        let Link {
+            file,
+            password: password_in_link,
+        } = link.parse()?;
+        let final_password = share_password // 先使用用户提供的密码
+            .or(password_in_link) // 否则使用链接中的密码
+            .unwrap_or_default(); // 否则使用空密码
+
+        self.get_file_by_id(&file, &final_password, token).await
     }
 }

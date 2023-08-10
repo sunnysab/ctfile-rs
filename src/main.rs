@@ -5,12 +5,28 @@ use anyhow::Result;
 use clap::Parser;
 use tokio::task;
 
-pub use api::{get_file_by_id, get_file_by_link};
-pub use api::{CtFile, CtFileSource};
+pub use api::{CtClient, CtFileObject, CtFileSourceObject};
 pub use downloader::DownloadQueue;
 
 const DEFAULT_TOKEN: &str = "5sijtqc2rlocvvkvmn7777";
 const DEFAULT_LISTEN_ADDR: &str = "localhost:7735";
+
+#[derive(Debug)]
+pub struct CtFile {
+    /// 文件名
+    pub name: String,
+    /// 发布时间，格式如 "2015-11-27"
+    pub publish_date: String,
+
+    /// 文件哈希值
+    pub checksum: String,
+    /// 直链地址
+    pub url: String,
+    /// 文件大小，格式如 "627.20 MB"
+    pub display_size: String,
+    /// 资源字节数
+    pub exact_size: usize,
+}
 
 #[derive(clap::Parser)]
 #[command(name = "ctfile-rs")]
@@ -67,24 +83,26 @@ fn display_file_size(len: usize) -> String {
     t[i].to_string()
 }
 
-async fn do_link_parsing(url: &str, password: Option<String>, token: Option<String>) -> Result<(CtFile, CtFileSource)> {
+async fn do_link_parsing(url: &str, password: Option<String>, token: Option<String>) -> Result<CtFile> {
     println!("URL {}", url);
     println!("Fetching file metadata...");
     let token = token.unwrap_or(DEFAULT_TOKEN.to_string());
-    let file = get_file_by_link(&url, password, &token).await?;
+    let client = CtClient::new();
 
+    let file = client.get_file_by_link(&url, password, &token).await?;
     println!(
-        "File {} ({}) uploaded on {}\nChecksum {}",
-        file.file_name, file.file_id, file.file_time, file.file_chk
+        r#"File {} uploaded on {}\n
+        Checksum {}\n
+        Length: {} ({})\n
+        Parsed result: {}"#,
+        file.name,
+        file.publish_date,
+        file.checksum,
+        file.exact_size,
+        display_file_size(file.exact_size),
+        file.url
     );
-    let source = file.get_download_source().await?;
-    println!(
-        "Length: {} ({})",
-        source.exact_size,
-        display_file_size(source.exact_size)
-    );
-    println!("Parsed link: {}", source.url);
-    Ok((file, source))
+    Ok(file)
 }
 
 async fn serve(cli: Cli) -> Result<()> {
@@ -101,15 +119,12 @@ async fn serve(cli: Cli) -> Result<()> {
             token,
             daemon,
         } => {
-            let (_file, source) = do_link_parsing(&url, password, token).await?;
+            let file = do_link_parsing(&url, password, token).await?;
             if let Some(_daemon) = daemon {
                 // TODO: 通知 daemon 添加任务.
             } else {
                 // TODO: 传入 checksum 供校验.
-                queue
-                    .push(&source)
-                    .await
-                    .expect("failed to add item to download queue.");
+                queue.push(&file).await.expect("failed to add item to download queue.");
             }
         }
         Commands::List { daemon } => {
