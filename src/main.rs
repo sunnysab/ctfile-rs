@@ -88,7 +88,7 @@ fn display_file_size(len: usize) -> String {
         r = len / n;
         i += 1;
     }
-    t[i].to_string()
+    format!("{}{}", r, t[i])
 }
 
 async fn do_link_parsing(url: &str, password: Option<String>, token: Option<String>) -> Result<CtFile> {
@@ -123,7 +123,11 @@ async fn daemon_task(queue: Rc<RefCell<DownloadQueue>>, socket: TcpStream) -> Re
                 stream.send(result).await?;
             }
             Command::Add(file) => {
-                queue.borrow_mut().push(&file).await?;
+                let message = match queue.borrow_mut().push(&file).await {
+                    Ok(_) => "ok".to_string(),
+                    Err(e) => e.to_string(),
+                };
+                stream.send(CommandResult::Added(message)).await?;
             }
         }
     }
@@ -161,14 +165,14 @@ fn print_list(status: &Vec<TaskStatus>) {
     let mut table = Table::new();
     table.add_row(row!["NAME", "RECEIVED", "TOTAL", "PROGRESS", "STATUS"]);
     for item in status {
-        let name = &item.name[..20];
-        let received = format!("{}", item.received);
-        let total = format!("{}", item.total);
+        let name = &item.name;
+        let received = display_file_size(item.received);
+        let total = display_file_size(item.total);
         let progress = format!("{:.0}%", item.received as f32 * 100.0f32 / item.total as f32);
         let status = if item.is_finished {
             String::from("FINISHED")
         } else {
-            item.fail_message.clone().unwrap_or_else(|| "UNKNOWN".to_string())
+            item.fail_message.clone().unwrap_or_else(|| "RUNNING".to_string())
         };
 
         table.add_row(row![name, received, total, progress, status]);
@@ -181,7 +185,6 @@ async fn request_once<Req: Encode, Res: Decode>(target: &str, request: Req) -> R
     let socket = TcpStream::connect(target).await?;
     let mut stream = BinStream::new(socket);
 
-    // tokio::time::sleep(Duration::from_secs(10)).await;
     stream.send(request).await?;
     stream.recv::<Res>().await
 }
@@ -206,7 +209,9 @@ async fn serve(cli: Cli) -> Result<()> {
         } => {
             let file = do_link_parsing(&url, password, token).await?;
             if let Some(addr) = daemon {
-                request_once(&addr, Command::Add(file)).await?;
+                if let CommandResult::Added(message) = request_once(&addr, Command::Add(file)).await? {
+                    println!("{}", message);
+                }
             } else {
                 use indicatif::ProgressBar;
 

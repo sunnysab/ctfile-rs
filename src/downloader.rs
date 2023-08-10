@@ -1,5 +1,5 @@
 use crate::CtFile;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use futures_util::StreamExt;
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -148,7 +148,7 @@ pub async fn download(file: &CtFile, path: &str) -> Result<DownloadTask> {
                     progress2.set_received(received);
                 }
                 Err(e) => {
-                    progress2.fail(format!("{e}"));
+                    progress2.fail(e.to_string());
                     return;
                 }
             }
@@ -156,7 +156,7 @@ pub async fn download(file: &CtFile, path: &str) -> Result<DownloadTask> {
         progress2.finish();
     });
 
-    let task = DownloadTaskBuilder::new(path)
+    let task = DownloadTaskBuilder::new(&file.name)
         .set_handle(handle)
         .set_progress(progress)
         .build();
@@ -173,7 +173,9 @@ impl DownloadQueue {
     }
 
     pub async fn push(&mut self, file: &CtFile) -> Result<()> {
-        let task = download(file, ".").await?;
+        let task = download(file, "/tmp")
+            .await
+            .context(format!("failed to add {} to download queue.", file.name))?;
         self.queue.push(task);
         Ok(())
     }

@@ -3,6 +3,7 @@ use crate::CtFile;
 
 use anyhow::Result;
 use bincode::{Decode, Encode};
+use clap::builder::Str;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -40,7 +41,7 @@ pub enum Command {
 #[derive(Encode, Decode)]
 pub enum CommandResult {
     List(Vec<TaskStatus>),
-    Add,
+    Added(String),
 }
 
 pub struct BinStream {
