@@ -1,78 +1,76 @@
 use crate::CtFile;
 use anyhow::{bail, Result};
 use futures_util::StreamExt;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
-type Shared<T> = Rc<Cell<T>>;
+#[derive(Clone, Default)]
+struct ProgressInner {
+    finished: bool,
+    failed: bool,
+    fail_message: String,
+
+    total: usize,
+    received: usize,
+}
 
 #[derive(Clone)]
 pub struct Progress {
-    finished: Shared<bool>,
-    failed: Shared<bool>,
-    fail_message: Rc<RefCell<String>>,
-
-    total: Shared<usize>,
-    received: Shared<usize>,
+    inner: Rc<RefCell<ProgressInner>>,
 }
 
 impl Progress {
     fn new(total: usize) -> Self {
-        let total = Rc::new(Cell::new(total));
-        let received = Rc::new(Cell::new(0));
-        let finished = Rc::new(Cell::new(false));
-        let failed = Rc::new(Cell::new(false));
-        let fail_message = Rc::new(RefCell::new("".to_string()));
+        let progress = ProgressInner {
+            total,
+            ..ProgressInner::default()
+        };
 
         Self {
-            finished,
-            failed,
-            fail_message,
-            total,
-            received,
+            inner: Rc::new(RefCell::new(progress)),
         }
     }
 
     pub fn total(&self) -> usize {
-        self.total.get()
+        self.inner.borrow().total
     }
 
     fn set_total(&self, total: usize) {
-        self.total.set(total);
+        self.inner.borrow_mut().total = total;
     }
 
     pub fn received(&self) -> usize {
-        self.received.get()
+        self.inner.borrow().received
     }
 
     fn set_received(&self, received: usize) {
-        self.received.set(received);
+        self.inner.borrow_mut().received = received;
     }
 
     pub fn is_finished(&self) -> bool {
-        self.finished.get()
+        self.inner.borrow().finished
     }
 
     fn finish(&self) {
-        self.finished.set(true);
+        self.inner.borrow_mut().finished = true;
     }
 
     pub fn is_failed(&self) -> bool {
-        self.failed.get()
+        self.inner.borrow().failed
     }
 
     pub fn get_err_message(&self) -> Option<String> {
         if self.is_failed() {
-            return Some(self.fail_message.clone().take());
+            return Some(self.inner.borrow().fail_message.clone());
         }
         None
     }
 
     fn fail<T: Into<String>>(&self, message: T) {
-        self.failed.set(true);
-        *self.fail_message.borrow_mut() = message.into();
+        self.inner.borrow_mut().failed = true;
+        self.inner.borrow_mut().fail_message = message.into();
     }
 }
 
