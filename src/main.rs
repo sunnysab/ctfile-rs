@@ -180,7 +180,6 @@ async fn serve(cli: Cli) -> Result<()> {
                 // TODO: 通知 daemon 添加任务.
                 unimplemented!()
             } else {
-                // TODO: 传入 checksum 供校验.
                 queue
                     .borrow_mut()
                     .push(&file)

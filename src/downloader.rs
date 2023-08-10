@@ -118,11 +118,11 @@ impl DownloadTaskBuilder {
     }
 }
 
-async fn download(url: &str, path: &str, expected_size: usize) -> Result<DownloadTask> {
+async fn download(file: &CtFile, path: &str) -> Result<DownloadTask> {
     let client = reqwest::Client::new();
-    let response = client.get(url).send().await?;
+    let response = client.get(&file.url).send().await?;
 
-    let content_length = response.content_length().map(|x| x as usize).unwrap_or(expected_size);
+    let content_length = response.content_length().map(|x| x as usize).unwrap_or(file.exact_size);
     let progress = Progress::new(content_length);
 
     let status = response.status();
@@ -170,10 +170,7 @@ impl DownloadQueue {
     }
 
     pub async fn push(&mut self, file: &CtFile) -> Result<()> {
-        let url = &file.url;
-        let filename = &file.name;
-
-        let task = download(url, filename, file.exact_size).await?;
+        let task = download(file, ".").await?;
         self.queue.push(task);
         Ok(())
     }
