@@ -133,8 +133,8 @@ fn run_process_into_daemon() -> Result<()> {
     use daemonize::Daemonize;
     use std::fs::File;
 
-    let stdout = File::create("/tmp/cffile-get-daemon.out")?;
-    let stderr = File::create("/tmp/cffile-get-daemon.err")?;
+    let stdout = File::create("/tmp/ctfile-get-daemon.out")?;
+    let stderr = File::create("/tmp/ctfile-get-daemon.err")?;
 
     let daemonize = Daemonize::new()
         .pid_file("/tmp/ctfile-get.pid")
@@ -181,6 +181,7 @@ async fn request_once<Req: Encode, Res: Decode>(target: &str, request: Req) -> R
     let socket = TcpStream::connect(target).await?;
     let mut stream = BinStream::new(socket);
 
+    // tokio::time::sleep(Duration::from_secs(10)).await;
     stream.send(request).await?;
     stream.recv::<Res>().await
 }
