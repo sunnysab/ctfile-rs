@@ -99,10 +99,10 @@ async fn do_link_parsing(url: &str, password: Option<String>, token: Option<Stri
 
     let file = client.get_file_by_link(url, password, &token).await?;
     println!(
-        r#"File {} uploaded on {}\n
-        Checksum {}\n
-        Length: {} ({})\n
-        Parsed result: {}"#,
+        "File {} uploaded on {}
+        Checksum {}
+        Length: {} ({})
+        Parsed result: '{}'",
         file.name,
         file.publish_date,
         file.checksum,
@@ -159,7 +159,7 @@ async fn daemon(queue: Rc<RefCell<DownloadQueue>>, listen: &str) -> Result<()> {
 
 fn print_list(status: &Vec<TaskStatus>) {
     use prettytable::row;
-    use prettytable::{Table};
+    use prettytable::Table;
 
     let mut table = Table::new();
     table.add_row(row!["NAME", "RECEIVED", "TOTAL", "PROGRESS", "STATUS"]);
