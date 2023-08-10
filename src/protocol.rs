@@ -54,24 +54,23 @@ impl BinStream {
     pub fn new(stream: TcpStream) -> Self {
         Self {
             stream,
-            tx_buffer: Vec::with_capacity(1024),
-            rx_buffer: Vec::with_capacity(1024),
+            tx_buffer: vec![0u8; 1024],
+            rx_buffer: vec![0u8; 1024],
         }
     }
 
     pub async fn send<T: Encode>(&mut self, payload: T) -> Result<()> {
         let config = bincode::config::standard();
-        bincode::encode_into_slice(payload, &mut self.tx_buffer, config)?;
+        let len = bincode::encode_into_slice(payload, &mut self.tx_buffer, config)?;
 
-        self.stream.write_u16(self.tx_buffer.len() as u16).await?;
-        self.stream.write_all(&self.tx_buffer).await?;
+        self.stream.write_u16(len as u16).await?;
+        self.stream.write_all(&self.tx_buffer[..len]).await?;
         Ok(())
     }
 
     pub async fn recv<T: Decode>(&mut self) -> Result<T> {
         let len = self.stream.read_u16().await? as usize;
-        self.stream.read(&mut self.rx_buffer[..len]).await?;
-
+        self.stream.read_exact(&mut self.rx_buffer[..len]).await?;
         let config = bincode::config::standard();
         let (result, _) = bincode::decode_from_slice(&self.rx_buffer[..len], config)?;
         Ok(result)
