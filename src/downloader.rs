@@ -2,7 +2,9 @@ use crate::CtFile;
 use anyhow::{bail, Result};
 use futures_util::StreamExt;
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::str::FromStr;
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
@@ -129,7 +131,10 @@ pub async fn download(file: &CtFile, path: &str) -> Result<DownloadTask> {
     }
 
     let mut stream = response.bytes_stream();
-    let mut target = tokio::fs::File::create(path).await?;
+
+    let mut file_full_path = PathBuf::from_str(path)?;
+    file_full_path.push(&file.name);
+    let mut target = tokio::fs::File::create(file_full_path).await?;
     let mut received = 0;
 
     let progress2 = progress.clone();

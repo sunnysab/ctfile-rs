@@ -5,16 +5,16 @@ mod protocol;
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use clap::Parser;
-use prettytable::row;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 use tokio::net::TcpStream;
 
 use tokio::task;
 
-use crate::protocol::{BinStream, Command, CommandResult, TaskStatus};
 pub use api::CtClient;
 pub use downloader::DownloadQueue;
+pub use protocol::{BinStream, Command, CommandResult, TaskStatus};
 
 const DEFAULT_TOKEN: &str = "5sijtqc2rlocvvkvmn7777";
 const DEFAULT_LISTEN_ADDR: &str = "localhost:7735";
@@ -99,10 +99,7 @@ async fn do_link_parsing(url: &str, password: Option<String>, token: Option<Stri
 
     let file = client.get_file_by_link(url, password, &token).await?;
     println!(
-        "File {} uploaded on {}
-        Checksum {}
-        Length: {} ({})
-        Parsed result: '{}'",
+        "File {} uploaded on {}\nChecksum {}\nLength: {} ({})\nParsed result: '{}'",
         file.name,
         file.publish_date,
         file.checksum,
@@ -218,6 +215,8 @@ async fn serve(cli: Cli) -> Result<()> {
                 while !task.progress.is_failed() && !task.progress.is_finished() {
                     let received = task.progress.received() as u64;
                     pb.set_position(received);
+
+                    tokio::time::sleep(Duration::from_millis(200)).await;
                 }
                 pb.finish();
             }
